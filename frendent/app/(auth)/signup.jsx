@@ -7,11 +7,8 @@ import {
   KeyboardAvoidingView,
   ScrollView,
   Platform,
-  Alert
-  
+  Alert,
 } from "react-native";
-
-
 
 import { Ionicons } from "@expo/vector-icons"; // Import Ionicons
 import styles from "../../assets/styles/signup.styles";
@@ -20,21 +17,18 @@ import { useState } from "react";
 import { useRouter } from "expo-router";
 import { useAuthStore } from "../../store/authStore";
 
-
 export default function Signup() {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-const {user, isLoading, register} = useAuthStore();
-
-
+  const { user, isLoading, register, token } = useAuthStore();
 
   const router = useRouter();
 
-  const handleSignup = async() => {
-      const result = await register(username, email, password);
-    if(!result.success ) Alert.alert("Error", result.error);
+  const handleSignup = async () => {
+    const result = await register(username, email, password);
+    if (!result.success) Alert.alert("Error", result.error);
   };
 
   return (
