@@ -8,13 +8,18 @@ import {
   TouchableOpacity,
   Image,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 import { useState } from "react";
 import { useRouter } from "expo-router";
-import * as ImagePicker from "expo-image-picker"; // FIX: Import ImagePicker
+import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
+import { Image as RNImage } from "react-native";
 import styles from "../../assets/styles/create.styles";
 import { Ionicons } from "@expo/vector-icons";
 import COLORS from "../../constants/colors";
+import { useAuthStore } from "../../store/authStore";
+import { API_URL } from "../../constants/api"; // Reintroduce the API_URL import
 
 export default function Create() {
   const [title, setTitle] = useState("");
@@ -25,6 +30,7 @@ export default function Create() {
   const [loading, setLoading] = useState(false);
 
   const router = useRouter();
+  const { token } = useAuthStore();
 
   const pickImage = async () => {
     try {
@@ -41,14 +47,30 @@ export default function Create() {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
+        allowsEditing: false,
         quality: 1,
-        base64: true, // Enable Base64 if needed
+        base64: true,
       });
 
-      if (!result.canceled) {
-        setImage(result.assets[0].uri);
-        setImageBase64(result.assets[0].base64 || null);
+      if (!result.canceled && result.assets?.length > 0) {
+        const selectedImage = result.assets[0];
+
+        RNImage.getSize(selectedImage.uri, (width, height) => {
+          console.log(`Original size: ${width}x${height}`);
+        });
+
+        const manipulatedImage = await ImageManipulator.manipulateAsync(
+          selectedImage.uri,
+          [{ resize: { width: 500 } }],
+          {
+            compress: 0.8,
+            format: ImageManipulator.SaveFormat.JPEG,
+            base64: true,
+          }
+        );
+
+        setImage(manipulatedImage.uri);
+        setImageBase64(manipulatedImage.base64 || null);
       }
     } catch (error) {
       console.error("Image selection error:", error);
@@ -56,24 +78,92 @@ export default function Create() {
     }
   };
 
-  const renderRatingPicker = () => {
-    const stars = [];
-    for (let i = 1; i <= 5; i++) {
-      stars.push(
-        <TouchableOpacity
-          key={i}
-          onPress={() => setRating(i)}
-          style={styles.starButton}
-        >
-          <Ionicons
-            name={i <= rating ? "star" : "star-outline"}
-            size={32}
-            color={i <= rating ? "#f4b400" : COLORS.textSecondary}
-          />
-        </TouchableOpacity>
-      );
+  const handleSubmit = async () => {
+    if (!title || !caption || !imageBase64 || !rating) {
+      Alert.alert("Error", "Please fill in all the fields.");
+      return;
     }
-    return <View style={styles.ratingContainer}>{stars}</View>;
+
+    // Validate token
+    if (!token) {
+      Alert.alert("Error", "Authentication token is missing. Please log in again.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const uriParts = image.split(".");
+      const fileType = uriParts[uriParts.length - 1];
+      const imageType = fileType
+        ? `image/${fileType.toLowerCase()}`
+        : "image/jpeg";
+      const imageDataUrl = `data:${imageType};base64,${imageBase64}`;
+
+      const response = await fetch(`${API_URL}/api/books`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title,
+          caption,
+          rating: rating.toString(),
+          image: imageDataUrl,
+        }),
+      });
+
+      // Log the response status and headers for debugging
+      console.log("Response Status:", response.status);
+      console.log("Response Headers:", response.headers);
+
+      // Check if the response is OK before parsing
+      if (!response.ok) {
+        const text = await response.text(); // Get the raw response as text
+        console.log("Raw Response:", text); // Log the raw response for debugging
+        throw new Error(
+          `Server responded with status ${response.status}: ${text}`
+        );
+      }
+
+      // Only parse as JSON if the response is OK
+      const data = await response.json();
+      Alert.alert("Success", "Your book recommendation has been posted!");
+      setTitle("");
+      setCaption("");
+      setRating(3);
+      setImage(null);
+      setImageBase64(null);
+      router.push("/");
+    } catch (error) {
+      console.log("Error creating post:", error);
+      Alert.alert(
+        "Error",
+        error.message || "Something went wrong while creating your post."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const renderRatingPicker = () => {
+    return (
+      <View style={styles.ratingContainer}>
+        {[...Array(5)].map((_, i) => (
+          <TouchableOpacity
+            key={i + 1}
+            onPress={() => setRating(i + 1)}
+            style={styles.starButton}
+          >
+            <Ionicons
+              name={i + 1 <= rating ? "star" : "star-outline"}
+              size={32}
+              color={i + 1 <= rating ? "#f4b400" : COLORS.textSecondary}
+            />
+          </TouchableOpacity>
+        ))}
+      </View>
+    );
   };
 
   return (
@@ -86,7 +176,6 @@ export default function Create() {
         style={styles.scrollViewStyle}
       >
         <View style={styles.card}>
-          {/* HEADER */}
           <View style={styles.header}>
             <Text style={styles.title}>Add Book Recommendations</Text>
             <Text style={styles.subtitle}>
@@ -95,7 +184,6 @@ export default function Create() {
           </View>
 
           <View style={styles.form}>
-            {/* TITLE */}
             <View style={styles.formGroup}>
               <Text style={styles.label}>Book Title</Text>
               <View style={styles.inputContainer}>
@@ -115,13 +203,11 @@ export default function Create() {
               </View>
             </View>
 
-            {/* RATING */}
             <View style={styles.formGroup}>
               <Text style={styles.label}>Rating</Text>
               {renderRatingPicker()}
             </View>
 
-            {/* IMAGE */}
             <View style={styles.formGroup}>
               <Text style={styles.label}>Book Image</Text>
               <TouchableOpacity style={styles.imagePicker} onPress={pickImage}>
@@ -141,6 +227,38 @@ export default function Create() {
                 )}
               </TouchableOpacity>
             </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Caption</Text>
+              <TextInput
+                style={styles.textArea}
+                placeholder="Write your review or thoughts about this book"
+                placeholderTextColor={COLORS.placeholderText}
+                value={caption}
+                onChangeText={setCaption}
+                multiline={true}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={styles.button}
+              onPress={handleSubmit}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color={COLORS.white} />
+              ) : (
+                <>
+                  <Ionicons
+                    name="cloud-upload-outline"
+                    size={20}
+                    color={COLORS.white}
+                    style={styles.buttonIcon}
+                  />
+                  <Text style={styles.buttonText}>Share</Text>
+                </>
+              )}
+            </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
